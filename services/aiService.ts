@@ -119,11 +119,29 @@ async function generateJSON<T>(prompt: string, schema?: object): Promise<T> {
 }
 
 // Qwen Image Generation
-async function generateImage(prompt: string, negativePrompt?: string, size?: string): Promise<string> {
+async function generateImage(prompt: string, negativePrompt?: string, size?: string, referenceImages?: string[]): Promise<string> {
     const key = getQwenApiKey();
     if (!key) {
         throw new Error("Qwen API key not found. Please set QWEN_API_KEY or GEMINI_API_KEY in environment or localStorage.");
     }
+
+    // Build content array with text and optional images
+    const content: Array<{ text?: string; image?: string }> = [{ text: prompt }];
+
+    // Add reference images to the content array for image-to-image generation
+    // Qwen API requires image to be either a public URL or a data URL (data:{mime_type};base64,{data})
+    if (referenceImages && referenceImages.length > 0) {
+        referenceImages.forEach(imgBase64 => {
+            // Ensure the image is in proper data URL format
+            let imageData = imgBase64;
+            if (!imgBase64.startsWith('data:')) {
+                // If raw base64, add the data URL prefix
+                imageData = `data:image/png;base64,${imgBase64}`;
+            }
+            content.push({ image: imageData });
+        });
+    }
+
     const response = await fetch(QWEN_IMAGE_URL, {
         method: 'POST',
         headers: {
@@ -136,9 +154,7 @@ async function generateImage(prompt: string, negativePrompt?: string, size?: str
                 messages: [
                     {
                         role: 'user',
-                        content: [
-                            { text: prompt }
-                        ]
+                        content: content
                     }
                 ]
             },
@@ -166,9 +182,9 @@ async function generateImage(prompt: string, negativePrompt?: string, size?: str
     }
 
     // Parse image from choices[0].message.content[0].image
-    const content = data.output?.choices?.[0]?.message?.content;
-    if (content && Array.isArray(content) && content[0]?.image) {
-        const imageUrl = content[0].image;
+    const responseContent = data.output?.choices?.[0]?.message?.content;
+    if (responseContent && Array.isArray(responseContent) && responseContent[0]?.image) {
+        const imageUrl = responseContent[0].image;
         console.log("Image URL found:", imageUrl);
         return await imageUrlToBase64(imageUrl);
     }
@@ -268,12 +284,14 @@ export async function generateDetailedStorySuggestion(
         contextPrompt += `\n\n**重要世界观背景：**\n${worldview}\n\n这个世界观是故事的基础真理。确保你的建议与这些规则保持一致。`;
     }
 
+    // 强调角色信息，让AI知道这些是已定义的角色
     if (characters && characters.length > 0) {
-        contextPrompt += "\n\n**角色档案：**\n";
+        contextPrompt += "\n\n**已定义的角色（重要！）：**\n";
+        contextPrompt += "以下是故事中已经创建的角色。当你在脚本中提到这些名字时，它们指的是这些角色，而不是字面意思的物体或食物。\n\n";
         characters.forEach(char => {
-            contextPrompt += `- **${char.name}：** ${char.description || '未提供描述。'}\n`;
+            contextPrompt += `- **「${char.name}」**：${char.description || '未提供描述。'}\n`;
         });
-        contextPrompt += "将这些角色特质融入他们的动作和对话中。";
+        contextPrompt += "\n**特别注意**：在用户的描述中，如果出现上述角色名称（如「${characters.map(c => c.name).join('」、「')}」），请将其视为角色名，而非普通名词。例如「芥末汤圆」是一个角色，而不是真的汤圆。\n";
     }
 
     if (previousPages && previousPages.length > 0) {
@@ -293,16 +311,16 @@ export async function generateDetailedStorySuggestion(
         contextPrompt += "\n\n**你的任务：**\n用户未提供具体前提。基于世界观、角色和前一页的背景，为故事提出一个逻辑且有趣的下一页。为此新漫画页面生成详细脚本。";
     }
 
-    contextPrompt += " 将故事分解为2-4个分镜。为每个分镜提供动作/镜头的简洁描述和任何角色对话。分镜可以描述环境、物体或无需角色的特写，只要服务于故事即可。**重要：所有对话必须使用英文。**";
+    contextPrompt += " 将故事分解为2-4个分镜。为每个分镜提供动作/镜头的简洁描述和任何角色对话。分镜可以描述环境、物体或无需角色的特写，只要服务于故事即可。**请使用中文输出所有内容（描述和对话）。**";
 
     contextPrompt += `\n\n请以以下JSON格式回复：
 {
-    "summary": "页面故事的简短一句话总结",
+    "summary": "页面故事的简短一句话总结（中文）",
     "panels": [
         {
             "panel": 1,
-            "description": "分镜的视觉动作描述",
-            "dialogue": "角色对话（可选）"
+            "description": "分镜的视觉动作描述（中文）",
+            "dialogue": "角色对话（中文，可选）"
         }
     ]
 }`;
@@ -336,24 +354,56 @@ export async function generateLayoutProposal(
 ): Promise<{ proposalImage: string }> {
     const config = ASPECT_RATIO_CONFIG[aspectRatioKey] || ASPECT_RATIO_CONFIG['A4'];
 
+    // Build character info
+    const characterInfo = characters.length > 0
+        ? characters.map(c => `- ${c.name}: ${c.description || '见角色参考图'}`).join('\n')
+        : '无特定角色';
+
     const prompt = `
         你是一位专业的漫画分镜艺术家。创建单页漫画的黑白草图分镜布局。
 
         **故事：**
         ${story}
 
+        **涉及角色：**
+        ${characterInfo}
+
+        **重要指导：**
+        - 如果提供了参考图，请参考其中的角色外观特征
+        - 根据故事内容合理安排角色位置和姿势
+        - 分镜应该清晰表达故事的进展
+
         **要求：**
         1. 比例为${config.value}，尺寸${config.w}x${config.h}像素
         2. 使用动态分镜布局，对角线切割，变化尺寸
         3. 粗略草图风格，简单线条
         4. 不包含任何文字或标注
-        ${previousPage ? '5. 必须是上一页内容的视觉延续' : ''}
+        ${previousPage ? '5. 必须是上一页内容的视觉延续，请参考提供的上一页布局图' : ''}
+        ${currentCanvasImage ? '6. 请参考提供的当前画布内容进行布局' : ''}
 
         请生成漫画分镜草图。
     `;
 
     const size = `${config.w}*${config.h}`;
-    const imageData = await generateImage(prompt, undefined, size);
+
+    // Collect reference images - include character sheets
+    const referenceImages: string[] = [];
+    if (previousPage?.proposalImage) {
+        referenceImages.push(previousPage.proposalImage);
+    }
+    if (currentCanvasImage) {
+        referenceImages.push(currentCanvasImage);
+    }
+    // Add character sheet images
+    characters.forEach(c => {
+        if (c.sheetImage) {
+            referenceImages.push(c.sheetImage);
+        }
+    });
+
+    console.log(`Generating layout with ${referenceImages.length} reference images`);
+
+    const imageData = await generateImage(prompt, undefined, size, referenceImages.length > 0 ? referenceImages : undefined);
 
     return { proposalImage: imageData };
 }
@@ -365,18 +415,21 @@ export async function generateCharacterSheet(
     colorMode: 'color' | 'monochrome'
 ): Promise<string> {
     const prompt = `
-        你是一位专业的漫画艺术家。为角色"${characterName}"创建角色参考表。
+        你是一位专业的漫画艺术家。请参考用户提供的图片，为角色"${characterName}"创建角色参考表。
+
+        **重要：必须严格参考用户上传的图片中人物的外观特征，包括性别、发型、面部特征、服装风格等。**
 
         **要求：**
         1. ${colorMode === 'monochrome' ? '黑白（单色）' : '全彩'}漫画风格
         2. 包含六个姿势，两行排列：
            - 顶行：三个头像（侧视、正视中性、正视微笑）
            - 底行：三个全身（正面、侧面、背面）
-        3. 干净的线条艺术风格
-        4. 不包含任何文字或标签
+        3. 保持参考图片中人物的核心特征（性别、发型、五官、服装等）
+        4. 干净的线条艺术风格
+        5. 不包含任何文字或标签
     `;
 
-    return await generateImage(prompt);
+    return await generateImage(prompt, undefined, undefined, referenceImagesBase64);
 }
 
 export async function generateCharacterFromReference(
@@ -386,9 +439,11 @@ export async function generateCharacterFromReference(
     colorMode: 'color' | 'monochrome'
 ): Promise<string> {
     const prompt = `
-        你是一位专业的漫画艺术家。创建全新原创角色"${characterName}"的角色参考表。
+        你是一位专业的漫画艺术家。请参考现有的角色表图片，创建全新原创角色"${characterName}"的角色参考表。
 
         **角色概念：** ${characterConcept}
+
+        **重要：请参考提供的角色表图片的风格和格式，但根据角色概念创建新角色。**
 
         **要求：**
         1. ${colorMode === 'monochrome' ? '黑白（单色）' : '全彩'}漫画风格
@@ -398,7 +453,7 @@ export async function generateCharacterFromReference(
         3. 不包含任何文字或标签
     `;
 
-    return await generateImage(prompt);
+    return await generateImage(prompt, undefined, undefined, referenceSheetImagesBase64);
 }
 
 
@@ -415,7 +470,7 @@ export async function editCharacterSheet(
         保持现有风格和布局，应用请求的更改。
     `;
 
-    return await generateImage(prompt);
+    return await generateImage(prompt, undefined, undefined, [sheetImageBase64]);
 }
 
 export async function generateMangaPage(
@@ -427,25 +482,45 @@ export async function generateMangaPage(
   generateEmptyBubbles: boolean
 ): Promise<GeneratedContent> {
 
-  const characterInfo = characters.map(c => c.name).join('、');
+  // Build character info with detailed descriptions
+  const characterDescriptions = characters.map(c =>
+    `- ${c.name}: ${c.description || '参考提供的角色图片'}`
+  ).join('\n');
 
   const prompt = `
-    你是一位专业的漫画艺术家。创建单页漫画。
+    你是一位专业的漫画艺术家。请根据以下信息创建单页漫画。
 
     **场景脚本：**
     ${sceneDescription}
 
-    **角色：** ${characterInfo}
+    **角色列表：**
+    ${characterDescriptions}
+
+    **重要指导：**
+    - 第一张参考图是画布布局图，请严格参考其中的分镜框位置、大小和角色姿势安排
+    - 后续的参考图是角色表图片，请严格参考这些图片中角色的外观、发型、服装等特征
+    - 如果场景中涉及角色，必须使用参考图中角色的外观特征，不要自行创造新角色
+    - 保持角色在整个页面中的一致性
 
     **要求：**
     1. ${colorMode === 'monochrome' ? '黑白（单色）' : '全彩'}漫画风格
     2. 严格遵循场景脚本的动作和表情
-    3. 保持角色外观一致
+    3. 角色外观必须与参考图一致
     4. ${generateEmptyBubbles ? '绘制空白对话气泡，不添加文字' : '在气泡中添加对话文字'}
     ${previousPage ? '5. 必须是上一页内容的直接延续' : ''}
   `;
 
-  const imageData = await generateImage(prompt);
+  // Include panel layout image and character sheet images as references
+  const referenceImages: string[] = [panelLayoutImageBase64];
+  characters.forEach(c => {
+    if (c.sheetImage) {
+      referenceImages.push(c.sheetImage);
+    }
+  });
+
+  console.log(`Generating manga page with ${referenceImages.length} reference images (${characters.length} characters)`);
+
+  const imageData = await generateImage(prompt, undefined, undefined, referenceImages);
 
   return { image: imageData, text: null };
 }
@@ -457,7 +532,7 @@ export async function colorizeMangaPage(
     const characterInfo = characters.map(c => `${c.name}: ${c.description || ''}`).join('\n');
 
     const prompt = `
-        你是一位专业的漫画数字着色师。为单色漫画页完全着色。
+        你是一位专业的漫画数字着色师。请参考提供的单色漫画页，为它完全着色。
 
         **角色参考：**
         ${characterInfo}
@@ -469,25 +544,31 @@ export async function colorizeMangaPage(
         4. 创造协调的氛围颜色
     `;
 
-    return await generateImage(prompt);
+    return await generateImage(prompt, undefined, undefined, [monochromePageBase64]);
 }
 
 export async function editMangaPage(
     originalImageBase64: string,
-    prompt: string,
+    promptText: string,
     maskImageBase64?: string,
     referenceImagesBase64?: string[]
 ): Promise<string> {
     const fullPrompt = `
         编辑漫画页面图像。
 
-        **修改要求：** ${prompt}
+        **修改要求：** ${promptText}
 
         ${maskImageBase64 ? '只修改遮罩白色区域，保持黑色区域不变。' : ''}
         确保编辑与原图无缝融合。
     `;
 
-    return await generateImage(fullPrompt);
+    // Combine original image with reference images
+    const allImages = [originalImageBase64];
+    if (referenceImagesBase64 && referenceImagesBase64.length > 0) {
+        allImages.push(...referenceImagesBase64);
+    }
+
+    return await generateImage(fullPrompt, undefined, undefined, allImages);
 }
 
 

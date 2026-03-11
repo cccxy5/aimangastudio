@@ -1,9 +1,11 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
+import { dataStoragePlugin } from './vite-plugins/dataStorage';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
+      plugins: [dataStoragePlugin()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.GLM_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

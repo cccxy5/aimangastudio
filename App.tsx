@@ -11,7 +11,9 @@ import { MangaViewerModal } from './components/MangaViewerModal';
 import { WorldviewModal } from './components/WorldviewModal';
 import { StorySuggestionModal } from './components/StorySuggestionModal';
 import { VideoProducer } from './components/VideoProducer';
+import { ProjectModal } from './components/ProjectModal';
 import { generateMangaPage, generateCharacterSheet, editCharacterSheet, colorizeMangaPage, editMangaPage, generateDetailedStorySuggestion, generateLayoutProposal, analyzeAndSuggestCorrections } from './services/geminiService';
+import type { Project } from './services/projectService';
 import type { Character, Page, CanvasShape, ViewTransform, StorySuggestion, PanelShape, ImageShape, AnalysisResult } from './types';
 import { AddUserIcon, TrashIcon, LinkIcon } from './components/icons';
 import { useLocalization } from './hooks/useLocalization';
@@ -73,14 +75,14 @@ const aspectRatios: { [key: string]: { name: string, value: string, w: number, h
 export default function App(): React.ReactElement {
   const { t, language, setLanguage } = useLocalization();
   const { apiKey, isApiKeyModalOpen, setIsApiKeyModalOpen, saveApiKey, clearApiKey, hasApiKey } = useApiKey();
-  
+
   const [pages, setPages] = useState<Page[]>([{...initialPage, id: Date.now().toString(), name: `${t('pages')} 1` }]);
   const [currentPageId, setCurrentPageId] = useState<string>(pages[0].id);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [showCharacterModal, setShowCharacterModal] = useState<boolean>(false);
   const [colorMode, setColorMode] = useState<'color' | 'monochrome'>('monochrome');
-  
+
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isColoring, setIsColoring] = useState<boolean>(false);
   const [isSuggestingStory, setIsSuggestingStory] = useState<boolean>(false);
@@ -102,6 +104,8 @@ export default function App(): React.ReactElement {
   const [showStorySuggestionModal, setShowStorySuggestionModal] = useState<boolean>(false);
   const [storySuggestion, setStorySuggestion] = useState<StorySuggestion | null>(null);
   const [generateEmptyBubbles, setGenerateEmptyBubbles] = useState<boolean>(false);
+
+  const [showProjectModal, setShowProjectModal] = useState<boolean>(false);
 
   const [assistantModeState, setAssistantModeState] = useState<{
     isActive: boolean;
@@ -531,6 +535,16 @@ export default function App(): React.ReactElement {
     })));
   };
 
+  const handleLoadProject = (project: Project) => {
+    setCharacters(project.characters || []);
+    setPages(project.pages || []);
+    setWorldview(project.worldview || '');
+    setColorMode(project.colorMode || 'monochrome');
+    if (project.pages && project.pages.length > 0) {
+      setCurrentPageId(project.pages[0].id);
+    }
+  };
+
   const handleAddPage = (switchToNewPage: boolean = true) => {
     const newPageId = Date.now().toString();
     const newPage: Page = {
@@ -607,8 +621,8 @@ export default function App(): React.ReactElement {
 
   return (
     <div className="flex flex-col h-screen font-sans bg-gray-50 text-gray-800">
-      <Header 
-        isSidebarOpen={isSidebarOpen} 
+      <Header
+        isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(p => !p)}
         language={language}
         setLanguage={(lang) => setLanguage(lang as Language)}
@@ -616,6 +630,7 @@ export default function App(): React.ReactElement {
   hasApiKey={hasApiKey}
         onShowMangaViewer={() => setShowMangaViewer(true)}
         onShowWorldview={() => setShowWorldviewModal(true)}
+        onShowProjectModal={() => setShowProjectModal(true)}
         currentView={currentView}
         onSetView={setCurrentView}
       />
@@ -661,6 +676,15 @@ export default function App(): React.ReactElement {
           }}
         />
       )}
+      <ProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        characters={characters}
+        pages={pages}
+        worldview={worldview}
+        colorMode={colorMode}
+        onLoadProject={handleLoadProject}
+      />
       {showMangaViewer && (
         <MangaViewerModal 
             pages={pages}

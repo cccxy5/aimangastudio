@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MenuIcon, XIcon, BookOpenIcon, GlobeIcon, VideoIcon, ArrowLeftIcon, KeyIcon } from './icons';
+import { MenuIcon, XIcon, BookOpenIcon, GlobeIcon, VideoIcon, ArrowLeftIcon, KeyIcon, FolderIcon } from './icons';
 import { useLocalization } from '../hooks/useLocalization';
 import { Language } from '../i18n/locales';
 
@@ -13,11 +13,12 @@ interface HeaderProps {
     hasApiKey?: boolean;
     onShowMangaViewer: () => void;
     onShowWorldview: () => void;
+    onShowProjectModal: () => void;
     currentView: 'manga-editor' | 'video-producer';
     onSetView: (view: 'manga-editor' | 'video-producer') => void;
 }
 
-export function Header({ isSidebarOpen, onToggleSidebar, language, setLanguage, onOpenApiKeyModal, hasApiKey, onShowMangaViewer, onShowWorldview, currentView, onSetView }: HeaderProps): React.ReactElement {
+export function Header({ isSidebarOpen, onToggleSidebar, language, setLanguage, onOpenApiKeyModal, hasApiKey, onShowMangaViewer, onShowWorldview, onShowProjectModal, currentView, onSetView }: HeaderProps): React.ReactElement {
   const { t } = useLocalization();
   const [isLangOpen, setIsLangOpen] = useState(false);
 
@@ -248,6 +249,9 @@ export function Header({ isSidebarOpen, onToggleSidebar, language, setLanguage, 
                     </button>
                     <button onClick={onShowWorldview} className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-indigo-600 p-2 rounded-md hover:bg-gray-100" title={t('worldviewSettings')}>
                         <GlobeIcon className="h-5 w-5" />
+                    </button>
+                    <button onClick={onShowProjectModal} className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-indigo-600 p-2 rounded-md hover:bg-gray-100" title={t('projectManagement') || '项目管理'}>
+                        <FolderIcon className="h-5 w-5" />
                     </button>
                 </>
             )}
